@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Houdini Particles + Mobile Hand Control</title>
+
+<style>
+html, body {
+  margin: 0;
+  overflow: hidden;
+  background: #050505;
+  font-family: Arial, sans-serif;
+  color: #ff4fa0;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* DESKTOP PANEL */
+#panel {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+
+  width: 260px;
+  max-height: 92vh;
+  overflow-y: auto;
+
+  background: rgba(8, 0, 6, 0.34);
+  backdrop-filter: blur(3px);
+
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 79, 160, 0.28);
+
+  font-size: 12px;
+  z-index: 10;
+}
+
+/* MOBILE PANEL FROM BOTTOM */
+@media (max-width: 768px) {
+  #panel {
+    top: auto;
+    left: 0;
+    bottom: 0;
+
+    width: calc(100vw - 28px);
+    max-height: 38vh;
+
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+
+    border-radius: 18px 18px 0 0;
+
+    background: rgba(5, 0, 5, 0.58);
+    backdrop-filter: blur(1px);
+
+    padding: 14px;
+  }
+
+  #video {
+    width: 95px !important;
+    right: 8px !important;
+    bottom: 42vh !important;
+  }
+}
+
+label {
+  display: block;
+  margin-top: 9px;
+  color: #ff8fc4;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #ff4fa0;
+}
+
+button {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+
+  border: 1px solid #ff4fa0;
+  border-radius: 10px;
+
+  background: #050005;
+  color: white;
+
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #12000d;
+  border-color: #ff79bb;
+}
+
+#video {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  width: 150px;
+  border-radius: 12px;
+  opacity: 0.25;
+  transform: scaleX(-1);
+  border: 1px solid rgba(255,79,160,0.35);
+  z-index: 9;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="canvas"></canvas>
+<video id="video" autoplay playsinline muted></video>
+
+<div id="panel">
+
+  <button onclick="randomize()">Randomize</button>
+  <button onclick="exportPNG()">Export PNG</button>
+  <button onclick="startCamera()">Start Hand Camera</button>
+
+  <label>Hand Influence <input id="handPower" type="range" min="0" max="4" step="0.01" value="1.4"></label>
+
+  <label>Cols <input id="cols" type="range" min="60" max="420" value="150"></label>
+  <label>Rows <input id="rows" type="range" min="60" max="420" value="150"></label>
+
+  <label>Speed <input id="speed" type="range" min="0" max="4" step="0.01" value="1"></label>
+  <label>Scale <input id="scale" type="range" min="0.4" max="4" step="0.01" value="1.7"></label>
+  <label>Point Size <input id="pscale" type="range" min="0.2" max="3" step="0.01" value="0.8"></label>
+
+  <label>X Min <input id="x_min" type="range" min="-400" max="400" value="0"></label>
+  <label>X Max <input id="x_max" type="range" min="0" max="800" value="400"></label>
+  <label>Y Min <input id="y_min" type="range" min="-400" max="400" value="0"></label>
+  <label>Y Max <input id="y_max" type="range" min="0" max="800" value="400"></label>
+
+  <label>K Divide <input id="k_div" type="range" min="2" max="40" step="0.1" value="8"></label>
+  <label>K Subtract <input id="k_sub" type="range" min="-30" max="30" step="0.1" value="13"></label>
+
+  <label>Y Wave Divide <input id="e_ydiv" type="range" min="4" max="80" step="0.1" value="24"></label>
+  <label>Q Add <input id="q_add" type="range" min="0" max="200" step="0.1" value="90"></label>
+  <label>Wave Power <input id="q_dk" type="range" min="-6" max="6" step="0.01" value="1"></label>
+
+  <label>Center X <input id="center_x" type="range" min="-300" max="500" value="200"></label>
+  <label>Center Y <input id="center_y" type="range" min="-300" max="500" value="200"></label>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const video = document.getElementById("video");
+
+let handsData = [];
+let handX = 0.5;
+let handY = 0.5;
+let fingerSpread = 0.0;
+let handActive = false;
+
+let handScaleBoost = 1.0;
+let leftControl = 0.5;
+let rightControl = 0.5;
+
+function resize() {
+  canvas.width = window.innerWidth * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+
+  ctx.setTransform(
+    devicePixelRatio,
+    0,
+    0,
+    devicePixelRatio,
+    0,
+    0
+  );
+}
+
+window.addEventListener("resize", resize);
+resize();
+
+function val(id) {
+  return parseFloat(document.getElementById(id).value);
+}
+
+function setVal(id, value) {
+  const el = document.getElementById(id);
+  el.value = Math.max(
+    parseFloat(el.min),
+    Math.min(parseFloat(el.max), value)
+  );
+}
+
+function exportPNG() {
+  const link = document.createElement("a");
+  link.download = "houdini_mobile_hand_particles.png";
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+function randomize() {
+  setVal("k_div", 5 + Math.random() * 22);
+  setVal("k_sub", 6 + Math.random() * 18);
+  setVal("e_ydiv", 12 + Math.random() * 45);
+  setVal("q_add", 40 + Math.random() * 120);
+  setVal("q_dk", -2 + Math.random() * 4);
+  setVal("speed", 0.4 + Math.random() * 2.2);
+}
+
+function dist(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+async function startCamera() {
+  const hands = new Hands({
+    locateFile: file =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 0,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(results => {
+    handsData = [];
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      handActive = true;
+
+      for (let h = 0; h < results.multiHandLandmarks.length; h++) {
+        const lm = results.multiHandLandmarks[h];
+
+        const wrist = lm[0];
+        const index = lm[8];
+        const middle = lm[12];
+
+        const screenX = 1.0 - wrist.x;
+        const screenY = wrist.y;
+
+        const twoFingerDistance = dist(index, middle);
+
+        handsData.push({
+          lm,
+          x: screenX,
+          y: screenY,
+          twoFingerDistance
+        });
+      }
+
+      handsData.sort((a, b) => a.x - b.x);
+
+      const mainHand = handsData[0];
+      const indexTip = mainHand.lm[8];
+      const thumbTip = mainHand.lm[4];
+      const middleTip = mainHand.lm[12];
+
+      handX += ((1.0 - indexTip.x) - handX) * 0.18;
+      handY += (indexTip.y - handY) * 0.18;
+      fingerSpread += (dist(thumbTip, middleTip) - fingerSpread) * 0.18;
+
+      if (handsData.length >= 2) {
+        const leftHand = handsData[0];
+        const rightHand = handsData[1];
+
+        const handDistance = dist(leftHand, rightHand);
+
+        handScaleBoost +=
+          ((0.7 + handDistance * 2.2) - handScaleBoost) * 0.12;
+
+        leftControl +=
+          (leftHand.twoFingerDistance - leftControl) * 0.15;
+
+        rightControl +=
+          (rightHand.twoFingerDistance - rightControl) * 0.15;
+
+        setVal("x_max", 250 + leftControl * 2600);
+        setVal("y_max", 250 + rightControl * 2600);
+      }
+
+    } else {
+      handActive = false;
+      fingerSpread *= 0.95;
+      handScaleBoost += (1.0 - handScaleBoost) * 0.08;
+    }
+  });
+
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    width: 640,
+    height: 480
+  });
+
+  camera.start();
+}
+
+function drawFingerCircles() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  ctx.save();
+
+  for (let hand of handsData) {
+    const tips = [4, 8, 12, 16, 20];
+
+    for (let id of tips) {
+      const p = hand.lm[id];
+
+      const x = (1.0 - p.x) * w;
+      const y = p.y * h;
+
+      ctx.beginPath();
+      ctx.arc(x, y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,79,160,0.82)";
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function draw(time) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  ctx.fillStyle = "rgba(5,5,5,0.22)";
+  ctx.fillRect(0, 0, w, h);
+
+  const cols = Math.floor(val("cols"));
+  const rows = Math.floor(val("rows"));
+
+  const speed = val("speed");
+  const scale = val("scale") * handScaleBoost;
+  const pscale = val("pscale");
+  const handPower = val("handPower");
+
+  const x_min = val("x_min");
+  const x_max = val("x_max");
+  const y_min = val("y_min");
+  const y_max = val("y_max");
+
+  const k_div = val("k_div");
+  const k_sub = val("k_sub");
+  const e_ydiv = val("e_ydiv");
+  const q_add = val("q_add");
+  const q_dk = val("q_dk");
+
+  const center_x = val("center_x");
+  const center_y = val("center_y");
+
+  const t = time * 0.001 * speed;
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+
+  const handShiftX = (handX - 0.5) * 140 * handPower;
+  const handShiftY = (handY - 0.5) * 140 * handPower;
+  const handWave = fingerSpread * 18.0 * handPower;
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+
+      let u = i / Math.max(1, cols - 1);
+      let v = j / Math.max(1, rows - 1);
+
+      let x = x_min + u * (x_max - x_min);
+      let y = y_min + v * (y_max - y_min);
+
+      if (handActive) {
+        x += Math.sin(v * 12.0 + t * 2.0) * handWave;
+        y += Math.cos(u * 12.0 + t * 2.0) * handWave;
+      }
+
+      let k = x / k_div - k_sub;
+
+      let e =
+        Math.cos(k + handShiftX * 0.01) +
+        Math.sin((y + handShiftY) / e_ydiv) +
+        Math.cos(k / 2.0 + fingerSpread * 8.0);
+
+      let d = Math.abs(e);
+
+      let q =
+        x / 4.0 +
+        q_add +
+        d * k * q_dk *
+        (1.0 + Math.cos(3.0 * d - 2.0 * t + y / 29.0));
+
+      let c =
+        (y * e) / 99.0 -
+        t / 18.0 +
+        d / 7.0;
+
+      if (handActive) {
+        c += (handX - 0.5) * handPower * 2.0;
+        q += (handY - 0.5) * handPower * 80.0;
+      }
+
+      let X = q * Math.cos(c);
+
+      let Y =
+        (q / 2.0 + 30.0 * Math.cos(c / 3.0)) *
+        Math.sin(c) +
+        80.0 * e;
+
+      let sx =
+        w / 2 +
+        (X - center_x) * scale;
+
+      let sy =
+        h / 2 +
+        (Y - center_y) * scale;
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, pscale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawFingerCircles();
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+
+</body>
+</html>
