@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Houdini Particles + Two Hand Control</title>
+<title>Houdini Particles + Mobile Hand Control</title>
 
 <style>
 html, body {
@@ -20,19 +20,53 @@ canvas {
   height: 100vh;
 }
 
+/* DESKTOP PANEL */
 #panel {
   position: fixed;
   top: 10px;
   left: 10px;
+
   width: 260px;
   max-height: 92vh;
   overflow-y: auto;
+
   background: rgba(8, 0, 6, 0.34);
   backdrop-filter: blur(3px);
+
   padding: 14px;
   border-radius: 14px;
   border: 1px solid rgba(255, 79, 160, 0.28);
+
   font-size: 12px;
+  z-index: 10;
+}
+
+/* MOBILE PANEL FROM BOTTOM */
+@media (max-width: 768px) {
+  #panel {
+    top: auto;
+    left: 0;
+    bottom: 0;
+
+    width: calc(100vw - 28px);
+    max-height: 38vh;
+
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+
+    border-radius: 18px 18px 0 0;
+
+    background: rgba(5, 0, 5, 0.58);
+    backdrop-filter: blur(1px);
+
+    padding: 14px;
+  }
+
+  #video {
+    width: 95px !important;
+    right: 8px !important;
+    bottom: 42vh !important;
+  }
 }
 
 label {
@@ -49,11 +83,14 @@ input[type="range"] {
 button {
   width: 100%;
   margin-top: 12px;
-  padding: 8px;
+  padding: 9px;
+
   border: 1px solid #ff4fa0;
   border-radius: 10px;
+
   background: #050005;
   color: white;
+
   font-weight: bold;
   cursor: pointer;
 }
@@ -72,6 +109,7 @@ button:hover {
   opacity: 0.25;
   transform: scaleX(-1);
   border: 1px solid rgba(255,79,160,0.35);
+  z-index: 9;
 }
 </style>
 </head>
@@ -89,8 +127,8 @@ button:hover {
 
   <label>Hand Influence <input id="handPower" type="range" min="0" max="4" step="0.01" value="1.4"></label>
 
-  <label>Cols <input id="cols" type="range" min="80" max="420" value="220"></label>
-  <label>Rows <input id="rows" type="range" min="80" max="420" value="220"></label>
+  <label>Cols <input id="cols" type="range" min="60" max="420" value="150"></label>
+  <label>Rows <input id="rows" type="range" min="60" max="420" value="150"></label>
 
   <label>Speed <input id="speed" type="range" min="0" max="4" step="0.01" value="1"></label>
   <label>Scale <input id="scale" type="range" min="0.4" max="4" step="0.01" value="1.7"></label>
@@ -134,7 +172,15 @@ let rightControl = 0.5;
 function resize() {
   canvas.width = window.innerWidth * devicePixelRatio;
   canvas.height = window.innerHeight * devicePixelRatio;
-  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+
+  ctx.setTransform(
+    devicePixelRatio,
+    0,
+    0,
+    devicePixelRatio,
+    0,
+    0
+  );
 }
 
 window.addEventListener("resize", resize);
@@ -146,12 +192,15 @@ function val(id) {
 
 function setVal(id, value) {
   const el = document.getElementById(id);
-  el.value = Math.max(parseFloat(el.min), Math.min(parseFloat(el.max), value));
+  el.value = Math.max(
+    parseFloat(el.min),
+    Math.min(parseFloat(el.max), value)
+  );
 }
 
 function exportPNG() {
   const link = document.createElement("a");
-  link.download = "houdini_two_hand_particles.png";
+  link.download = "houdini_mobile_hand_particles.png";
   link.href = canvas.toDataURL("image/png");
   link.click();
 }
@@ -194,11 +243,8 @@ async function startCamera() {
         const lm = results.multiHandLandmarks[h];
 
         const wrist = lm[0];
-        const thumb = lm[4];
         const index = lm[8];
         const middle = lm[12];
-        const ring = lm[16];
-        const pinky = lm[20];
 
         const screenX = 1.0 - wrist.x;
         const screenY = wrist.y;
@@ -229,10 +275,15 @@ async function startCamera() {
         const rightHand = handsData[1];
 
         const handDistance = dist(leftHand, rightHand);
-        handScaleBoost += ((0.7 + handDistance * 2.2) - handScaleBoost) * 0.12;
 
-        leftControl += (leftHand.twoFingerDistance - leftControl) * 0.15;
-        rightControl += (rightHand.twoFingerDistance - rightControl) * 0.15;
+        handScaleBoost +=
+          ((0.7 + handDistance * 2.2) - handScaleBoost) * 0.12;
+
+        leftControl +=
+          (leftHand.twoFingerDistance - leftControl) * 0.15;
+
+        rightControl +=
+          (rightHand.twoFingerDistance - rightControl) * 0.15;
 
         setVal("x_max", 250 + leftControl * 2600);
         setVal("y_max", 250 + rightControl * 2600);
