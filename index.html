@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Houdini Particles + Mobile Hand Control</title>
+<title>Houdini Particles + Simple Hand Control</title>
 
 <style>
 html, body {
@@ -358,58 +358,74 @@ async function startCamera() {
 
       for (let h = 0; h < results.multiHandLandmarks.length; h++) {
         const lm = results.multiHandLandmarks[h];
-
         const wrist = lm[0];
+        const thumb = lm[4];
         const index = lm[8];
         const middle = lm[12];
+        const ring = lm[16];
+        const pinky = lm[20];
 
+        // mirrored screen coordinates, so left/right feels natural to the viewer
         const screenX = 1.0 - wrist.x;
         const screenY = wrist.y;
 
-        const twoFingerDistance = dist(index, middle);
+        // open / close finger value, averaged from fingertip distances
+        const openClose = (
+          dist(thumb, index) +
+          dist(thumb, middle) +
+          dist(thumb, ring) +
+          dist(thumb, pinky)
+        ) / 4.0;
 
         handsData.push({
           lm,
           x: screenX,
           y: screenY,
-          twoFingerDistance
+          openClose
         });
       }
 
       handsData.sort((a, b) => a.x - b.x);
 
-      const mainHand = handsData[0];
-      const indexTip = mainHand.lm[8];
-      const thumbTip = mainHand.lm[4];
-      const middleTip = mainHand.lm[12];
+      const power = Math.max(0.0, Math.min(1.0, val("handPower") / 4.0));
+      const smooth = 0.16 * power;
 
-      handX += ((1.0 - indexTip.x) - handX) * 0.18;
-      handY += (indexTip.y - handY) * 0.18;
-      fingerSpread += (dist(thumbTip, middleTip) - fingerSpread) * 0.18;
+      if (handsData.length === 1) {
+        const hand = handsData[0];
 
-      if (handsData.length >= 2) {
+        // ONE HAND:
+        // left / right -> X Max only
+        // up / down -> Y Max only
+        // open / close fingers -> Q Add only
+        const targetXMax = 80 + hand.x * 720;
+        const targetYMax = 80 + (1.0 - hand.y) * 720;
+        const targetQAdd = Math.max(0, Math.min(200, hand.openClose * 900));
+
+        setVal("x_max", val("x_max") + (targetXMax - val("x_max")) * smooth);
+        setVal("y_max", val("y_max") + (targetYMax - val("y_max")) * smooth);
+        setVal("q_add", val("q_add") + (targetQAdd - val("q_add")) * smooth);
+
+      } else if (handsData.length >= 2) {
         const leftHand = handsData[0];
-        const rightHand = handsData[1];
+        const rightHand = handsData[handsData.length - 1];
 
+        // TWO HANDS:
+        // left hand left / right -> X Max only
+        // right hand up / down -> Y Max only
+        // distance between both hands -> Q Add only
         const handDistance = dist(leftHand, rightHand);
 
-        handScaleBoost +=
-          ((0.7 + handDistance * 2.2) - handScaleBoost) * 0.12;
+        const targetXMax = 80 + leftHand.x * 720;
+        const targetYMax = 80 + (1.0 - rightHand.y) * 720;
+        const targetQAdd = Math.max(0, Math.min(200, handDistance * 220));
 
-        leftControl +=
-          (leftHand.twoFingerDistance - leftControl) * 0.15;
-
-        rightControl +=
-          (rightHand.twoFingerDistance - rightControl) * 0.15;
-
-        setVal("x_max", 250 + leftControl * 2600);
-        setVal("y_max", 250 + rightControl * 2600);
+        setVal("x_max", val("x_max") + (targetXMax - val("x_max")) * smooth);
+        setVal("y_max", val("y_max") + (targetYMax - val("y_max")) * smooth);
+        setVal("q_add", val("q_add") + (targetQAdd - val("q_add")) * smooth);
       }
 
     } else {
       handActive = false;
-      fingerSpread *= 0.95;
-      handScaleBoost += (1.0 - handScaleBoost) * 0.08;
     }
   });
 
@@ -466,7 +482,7 @@ function draw(time) {
   const rows = Math.floor(val("rows"));
 
   const speed = val("speed");
-  const scale = val("scale") * handScaleBoost;
+  const scale = val("scale");
   const pscale = val("pscale");
   const handPower = val("handPower");
   const symmetryOn = val("symmetryOn");
@@ -492,9 +508,6 @@ function draw(time) {
 
   ctx.fillStyle = "rgba(255,255,255,0.92)";
 
-  const handShiftX = (handX - 0.5) * 140 * handPower;
-  const handShiftY = (handY - 0.5) * 140 * handPower;
-  const handWave = fingerSpread * 18.0 * handPower;
 
   for (let j = 0; j < rows; j++) {
     for (let i = 0; i < cols; i++) {
@@ -511,17 +524,13 @@ function draw(time) {
       let x = x_min + u * (x_max - x_min);
       let y = y_min + v * (y_max - y_min);
 
-      if (handActive) {
-        x += Math.sin(v * 12.0 + t * 2.0) * handWave;
-        y += Math.cos(u * 12.0 + t * 2.0) * handWave;
-      }
 
       let k = x / k_div - k_sub;
 
       let e =
-        Math.cos(k + handShiftX * 0.01) +
-        Math.sin((y + handShiftY) / e_ydiv) +
-        Math.cos(k / 2.0 + fingerSpread * 8.0);
+        Math.cos(k) +
+        Math.sin(y / e_ydiv) +
+        Math.cos(k / 2.0);
 
       let d = Math.abs(e);
 
@@ -536,10 +545,6 @@ function draw(time) {
         t / 18.0 +
         d / 7.0;
 
-      if (handActive) {
-        c += (handX - 0.5) * handPower * 2.0;
-        q += (handY - 0.5) * handPower * 80.0;
-      }
 
       let X = q * Math.cos(c);
 
