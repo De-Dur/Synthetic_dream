@@ -41,9 +41,16 @@ canvas {
   z-index: 10;
 }
 
-#exportTop {
+#exportRow {
   width: 100%;
   margin: 0 0 10px 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+#exportRow button {
+  margin: 0;
 }
 
 .controlsGrid {
@@ -152,7 +159,10 @@ button:hover {
 
 <div id="panel">
 
-  <button id="exportTop" onclick="exportPNG()">Export PNG</button>
+  <div id="exportRow">
+    <button onclick="exportPNG()">Export PNG</button>
+    <button id="exportMP4Btn" onclick="exportMP4()">Export MP4</button>
+  </div>
 
   <div class="controlsGrid">
 
@@ -320,6 +330,91 @@ function exportPNG() {
   link.download = "houdini_mobile_hand_particles.png";
   link.href = canvas.toDataURL("image/png");
   link.click();
+}
+
+function exportMP4() {
+  const btn = document.getElementById("exportMP4Btn");
+
+  if (!canvas.captureStream) {
+    alert("Video export is not supported in this browser. Try Chrome or Edge.");
+    return;
+  }
+
+  let mimeType = "";
+
+  if (MediaRecorder.isTypeSupported("video/mp4;codecs=h264")) {
+    mimeType = "video/mp4;codecs=h264";
+  } else if (MediaRecorder.isTypeSupported("video/mp4")) {
+    mimeType = "video/mp4";
+  } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+    mimeType = "video/webm;codecs=vp9";
+  } else if (MediaRecorder.isTypeSupported("video/webm")) {
+    mimeType = "video/webm";
+  } else {
+    alert("Video export is not supported in this browser.");
+    return;
+  }
+
+  const isMP4 = mimeType.includes("mp4");
+  const extension = isMP4 ? "mp4" : "webm";
+  const stream = canvas.captureStream(30);
+  const chunks = [];
+
+  let recorder;
+
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType: mimeType,
+      videoBitsPerSecond: 8000000
+    });
+  } catch (err) {
+    alert("Could not start video recorder: " + err.message);
+    return;
+  }
+
+  recorder.ondataavailable = event => {
+    if (event.data && event.data.size > 0) {
+      chunks.push(event.data);
+    }
+  };
+
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mimeType });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.download = "houdini_mobile_hand_particles_15sec." + extension;
+    link.href = url;
+    link.click();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    btn.textContent = "Export MP4";
+    btn.disabled = false;
+    btn.style.opacity = "1";
+  };
+
+  btn.disabled = true;
+  btn.style.opacity = "0.65";
+
+  let secondsLeft = 15;
+  btn.textContent = "Recording 15s";
+
+  const timer = setInterval(() => {
+    secondsLeft--;
+    btn.textContent = "Recording " + secondsLeft + "s";
+    if (secondsLeft <= 0) {
+      clearInterval(timer);
+    }
+  }, 1000);
+
+  recorder.start();
+
+  setTimeout(() => {
+    if (recorder && recorder.state === "recording") {
+      recorder.stop();
+    }
+  }, 15000);
 }
 
 function randomize() {
