@@ -155,6 +155,7 @@ button:hover {
 <body>
 
 <canvas id="canvas"></canvas>
+<canvas id="exportCanvas" style="display:none;"></canvas>
 <video id="video" autoplay playsinline muted></video>
 
 <div id="panel">
@@ -284,6 +285,8 @@ button:hover {
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const exportCanvas = document.getElementById("exportCanvas");
+const exportCtx = exportCanvas.getContext("2d");
 const video = document.getElementById("video");
 
 let handsData = [];
@@ -325,17 +328,41 @@ function setVal(id, value) {
   );
 }
 
+function drawToExportCanvas() {
+  const exportW = 1080;
+  const exportH = 1920;
+
+  exportCanvas.width = exportW;
+  exportCanvas.height = exportH;
+
+  exportCtx.fillStyle = "#050505";
+  exportCtx.fillRect(0, 0, exportW, exportH);
+
+  const sourceW = canvas.width;
+  const sourceH = canvas.height;
+
+  const coverScale = Math.max(exportW / sourceW, exportH / sourceH);
+  const drawW = sourceW * coverScale;
+  const drawH = sourceH * coverScale;
+  const dx = (exportW - drawW) * 0.5;
+  const dy = (exportH - drawH) * 0.5;
+
+  exportCtx.drawImage(canvas, dx, dy, drawW, drawH);
+}
+
 function exportPNG() {
+  drawToExportCanvas();
+
   const link = document.createElement("a");
-  link.download = "houdini_mobile_hand_particles.png";
-  link.href = canvas.toDataURL("image/png");
+  link.download = "houdini_mobile_hand_particles_9x16.png";
+  link.href = exportCanvas.toDataURL("image/png");
   link.click();
 }
 
 function exportMP4() {
   const btn = document.getElementById("exportMP4Btn");
 
-  if (!canvas.captureStream) {
+  if (!exportCanvas.captureStream) {
     alert("Video export is not supported in this browser. Try Chrome or Edge.");
     return;
   }
@@ -357,7 +384,11 @@ function exportMP4() {
 
   const isMP4 = mimeType.includes("mp4");
   const extension = isMP4 ? "mp4" : "webm";
-  const stream = canvas.captureStream(30);
+
+  exportCanvas.width = 1080;
+  exportCanvas.height = 1920;
+
+  const stream = exportCanvas.captureStream(30);
   const chunks = [];
 
   let recorder;
@@ -365,11 +396,20 @@ function exportMP4() {
   try {
     recorder = new MediaRecorder(stream, {
       mimeType: mimeType,
-      videoBitsPerSecond: 8000000
+      videoBitsPerSecond: 9000000
     });
   } catch (err) {
     alert("Could not start video recorder: " + err.message);
     return;
+  }
+
+  let recording = true;
+
+  function drawExportFrame() {
+    if (!recording) return;
+
+    drawToExportCanvas();
+    requestAnimationFrame(drawExportFrame);
   }
 
   recorder.ondataavailable = event => {
@@ -379,11 +419,13 @@ function exportMP4() {
   };
 
   recorder.onstop = () => {
+    recording = false;
+
     const blob = new Blob(chunks, { type: mimeType });
     const url = URL.createObjectURL(blob);
 
     const link = document.createElement("a");
-    link.download = "houdini_mobile_hand_particles_15sec." + extension;
+    link.download = "houdini_mobile_hand_particles_9x16_15sec." + extension;
     link.href = url;
     link.click();
 
@@ -408,6 +450,7 @@ function exportMP4() {
     }
   }, 1000);
 
+  drawExportFrame();
   recorder.start();
 
   setTimeout(() => {
